@@ -25,7 +25,7 @@ def seconds_to_time(seconds):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 Привет! Отправь мне PDF-файл с отчетом, и я рассчитаю время доставки и заработок!")
+    bot.reply_to(message, "👋 Cześć! Wyślij mi plik PDF z podsumowaniem dostaw, a ja policzę średni czas i zarobek!")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -39,7 +39,7 @@ def reset_data(message):
             'start_orders': 0,
             'files_uploaded': 0
         }
-    bot.send_message(message.chat.id, "✅ Все данные обнулены. Вы можете загружать новые файлы!")
+    bot.send_message(message.chat.id, "✅ Wszystkie dane zostały wyczyszczone. Możesz wysłać nowe pliki!")
 
 @bot.message_handler(content_types=['document'])
 def handle_pdf(message):
@@ -62,11 +62,12 @@ def handle_pdf(message):
     for page in pdf:
         text += page.get_text()
 
-    delivery_match = re.search(r'Average order delivery time\s+(\d{1,2}:\d{2})', text)
-    start_match = re.search(r'Average Jush task start time\s+(\d{1,2}:\d{2})', text)
+    # Теперь ищем по польским названиям
+    delivery_match = re.search(r'Średni czas dostawy\s+(\d{1,2}:\d{2})', text)
+    start_match = re.search(r'Średni czas wyjazdu\s+(\d{1,2}:\d{2})', text)
 
     if not (delivery_match and start_match):
-        bot.send_message(message.chat.id, "❌ Не удалось найти время доставки или старта в файле.")
+        bot.send_message(message.chat.id, "❌ Nie udało się znaleźć czasu dostawy lub wyjazdu w pliku.")
         return
 
     delivery_time = delivery_match.group(1)
@@ -78,7 +79,7 @@ def handle_pdf(message):
     task_hours = re.findall(r'jush\s+(\d{1,2}):00\s+(\d+)\s+', text)
 
     if not task_hours:
-        bot.send_message(message.chat.id, "❌ Не удалось найти табличку с заказами по часам.")
+        bot.send_message(message.chat.id, "❌ Nie udało się znaleźć tabeli zamówień według godzin.")
         return
 
     delivery_orders = 0
@@ -91,7 +92,7 @@ def handle_pdf(message):
             delivery_orders += orders
         start_orders += orders
 
-    earnings_match = re.search(r'Total earnings\s+(\d+[.,]?\d*)\s*z\u{142}', text)
+    earnings_match = re.search(r'Suma zarobków\s+(\d+[.,]?\d*)\s*zł', text)
     if earnings_match:
         earnings = float(earnings_match.group(1).replace(',', '.'))
     else:
@@ -120,13 +121,13 @@ def handle_pdf(message):
     total_earnings = user_data[user_id]['total_earnings']
 
     result = f"""
-СРЕДНЕЕ ВРЕМЯ ДОСТАВКИ (до 23:00): {seconds_to_time(int(final_delivery))}
-СРЕДНЕЕ ВРЕМЯ ВЫЕЗДА (все заказы): {seconds_to_time(int(final_start))}
-ОБЩИЙ ЗАРАБОТОК: {total_earnings:.2f} zł
+ŚREDNI CZAS DOSTAWY (do 23:00): {seconds_to_time(int(final_delivery))}
+ŚREDNI CZAS WYJAZDU (wszystkie zamówienia): {seconds_to_time(int(final_start))}
+ŁĄCZNE ZAROBKI: {total_earnings:.2f} zł
 
-Проанализировано файлов: {user_data[user_id]['files_uploaded']}
-Всего заказов доставки: {total_delivery_orders}
-Всего заказов выезда: {total_start_orders}
+Przeanalizowano plików: {user_data[user_id]['files_uploaded']}
+Łączna liczba zamówień dostawy: {total_delivery_orders}
+Łączna liczba zamówień wyjazdu: {total_start_orders}
 """
 
     bot.send_message(message.chat.id, result)
