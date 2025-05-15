@@ -3,8 +3,13 @@ import telebot
 import fitz  # PyMuPDF
 import re
 import io
+import os
 
-TOKEN = 'ТВОЙ_ТОКЕН_ОТ_BOTFATHER'
+TOKEN = os.environ.get('TOKEN')
+
+if not TOKEN:
+    raise ValueError("❌ TOKEN не найден! Проверь, задана ли переменная окружения 'TOKEN'.")
+
 bot = telebot.TeleBot(TOKEN)
 
 user_data = {}
@@ -17,6 +22,10 @@ def seconds_to_time(seconds):
     minutes = seconds // 60
     sec = seconds % 60
     return f"{minutes}:{sec:02d}"
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "👋 Привет! Отправь мне PDF-файл с отчетом, и я рассчитаю время доставки и заработок!")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
