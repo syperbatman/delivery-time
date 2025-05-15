@@ -2,20 +2,19 @@
 import telebot
 import fitz  # PyMuPDF
 import re
-import io
 import os
 
 TOKEN = os.environ.get('TOKEN')
 
 if not TOKEN:
-    raise ValueError("❌ TOKEN не найден! Проверь, задана ли переменная окружения 'TOKEN'.")
+    raise ValueError("❌ TOKEN not found! Check if 'TOKEN' environment variable is set.")
 
 bot = telebot.TeleBot(TOKEN)
 
 user_data = {}
 
 def time_to_seconds(time_str):
-    minutes, seconds = map(int, time_str.split(':'))
+    minutes, seconds = map(int, time_str.strip().split(':'))
     return minutes * 60 + seconds
 
 def seconds_to_time(seconds):
@@ -25,21 +24,20 @@ def seconds_to_time(seconds):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 Cześć! Wyślij mi plik PDF z podsumowaniem dostaw, a ja policzę średni czas i zarobek!")
+    bot.reply_to(message, "👋 Hi! Send me a PDF summary, and I'll calculate your average delivery time and earnings!")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
     user_id = message.from_user.id
-    if user_id in user_data:
-        user_data[user_id] = {
-            'total_delivery_seconds': 0,
-            'total_start_seconds': 0,
-            'total_earnings': 0,
-            'delivery_orders': 0,
-            'start_orders': 0,
-            'files_uploaded': 0
-        }
-    bot.send_message(message.chat.id, "✅ Wszystkie dane zostały wyczyszczone. Możesz wysłać nowe pliki!")
+    user_data[user_id] = {
+        'total_delivery_seconds': 0,
+        'total_start_seconds': 0,
+        'total_earnings': 0,
+        'delivery_orders': 0,
+        'start_orders': 0,
+        'files_uploaded': 0
+    }
+    bot.send_message(message.chat.id, "✅ All data has been reset. Ready for new files!")
 
 @bot.message_handler(content_types=['document'])
 def handle_pdf(message):
@@ -62,16 +60,34 @@ def handle_pdf(message):
     for page in pdf:
         text += page.get_text()
 
-    # Теперь ищем по польским названиям
-    delivery_match = re.search(r'Średni czas dostawy\s+(\d{1,2}:\d{2})', text)
-    start_match = re.search(r'Średni czas wyjazdu\s+(\d{1,2}:\d{2})', text)
+    lines = text.splitlines()
 
-    if not (delivery_match and start_match):
-        bot.send_message(message.chat.id, "❌ Nie udało się znaleźć czasu dostawy lub wyjazdu w pliku.")
+    delivery_time = None
+    start_time = None
+    earnings = 0.0
+
+    for idx, line in enumerate(lines):
+        if "Average order delivery time" in line:
+            if idx + 1 < len(lines):
+                candidate = lines[idx + 1].strip()
+                if re.match(r'^\d{1,2}:\d{2}$', candidate):
+                    delivery_time = candidate
+        if "Average Jush task start time" in line:
+            if idx + 1 < len(lines):
+                candidate = lines[idx + 1].strip()
+                if re.match(r'^\d{1,2}:\d{2}$', candidate):
+                    start_time = candidate
+        if "Total earnings" in line:
+            if idx + 1 < len(lines):
+                candidate_line = lines[idx + 1].strip()
+                match = re.search(r'(\d+[.,]?\d*)\s*zł', candidate_line)
+                if match:
+                    earnings = float(match.group(1).replace(',', '.'))
+            break
+
+    if not (delivery_time and start_time):
+        bot.send_message(message.chat.id, "❌ Couldn't find delivery or start times in the file.")
         return
-
-    delivery_time = delivery_match.group(1)
-    start_time = start_match.group(1)
 
     delivery_seconds = time_to_seconds(delivery_time)
     start_seconds = time_to_seconds(start_time)
@@ -79,7 +95,7 @@ def handle_pdf(message):
     task_hours = re.findall(r'jush\s+(\d{1,2}):00\s+(\d+)\s+', text)
 
     if not task_hours:
-        bot.send_message(message.chat.id, "❌ Nie udało się znaleźć tabeli zamówień według godzin.")
+        bot.send_message(message.chat.id, "❌ Couldn't find order-by-hour table.")
         return
 
     delivery_orders = 0
@@ -92,12 +108,6 @@ def handle_pdf(message):
             delivery_orders += orders
         start_orders += orders
 
-    earnings_match = re.search(r'Suma zarobków\s+(\d+[.,]?\d*)\s*zł', text)
-    if earnings_match:
-        earnings = float(earnings_match.group(1).replace(',', '.'))
-    else:
-        earnings = 0.0
-
     user_data[user_id]['total_delivery_seconds'] += delivery_seconds * delivery_orders
     user_data[user_id]['total_start_seconds'] += start_seconds * start_orders
     user_data[user_id]['total_earnings'] += earnings
@@ -108,26 +118,18 @@ def handle_pdf(message):
     total_delivery_orders = user_data[user_id]['delivery_orders']
     total_start_orders = user_data[user_id]['start_orders']
 
-    if total_delivery_orders > 0:
-        final_delivery = user_data[user_id]['total_delivery_seconds'] / total_delivery_orders
-    else:
-        final_delivery = 0
-
-    if total_start_orders > 0:
-        final_start = user_data[user_id]['total_start_seconds'] / total_start_orders
-    else:
-        final_start = 0
-
+    final_delivery = user_data[user_id]['total_delivery_seconds'] / total_delivery_orders if total_delivery_orders else 0
+    final_start = user_data[user_id]['total_start_seconds'] / total_start_orders if total_start_orders else 0
     total_earnings = user_data[user_id]['total_earnings']
 
     result = f"""
-ŚREDNI CZAS DOSTAWY (do 23:00): {seconds_to_time(int(final_delivery))}
-ŚREDNI CZAS WYJAZDU (wszystkie zamówienia): {seconds_to_time(int(final_start))}
-ŁĄCZNE ZAROBKI: {total_earnings:.2f} zł
+🚀 AVERAGE DELIVERY TIME (before 23:00): {seconds_to_time(int(final_delivery))}
+🚀 AVERAGE START TIME (all orders): {seconds_to_time(int(final_start))}
+💰 TOTAL EARNINGS: {total_earnings:.2f} zł
 
-Przeanalizowano plików: {user_data[user_id]['files_uploaded']}
-Łączna liczba zamówień dostawy: {total_delivery_orders}
-Łączna liczba zamówień wyjazdu: {total_start_orders}
+📄 Files analyzed: {user_data[user_id]['files_uploaded']}
+📦 Total delivery orders: {total_delivery_orders}
+📦 Total start orders: {total_start_orders}
 """
 
     bot.send_message(message.chat.id, result)
