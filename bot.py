@@ -7,7 +7,7 @@ import os
 TOKEN = os.environ.get('TOKEN')
 
 if not TOKEN:
-    raise ValueError("❌ TOKEN not found! Check if 'TOKEN' environment variable is set.")
+    raise ValueError("❌ TOKEN not found!")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -37,7 +37,7 @@ def reset_data(message):
         'start_orders': 0,
         'files_uploaded': 0
     }
-    bot.send_message(message.chat.id, "✅ All data has been reset. Ready for new files!")
+    bot.send_message(message.chat.id, "✅ Data reset. Ready for new uploads!")
 
 @bot.message_handler(content_types=['document'])
 def handle_pdf(message):
@@ -60,30 +60,35 @@ def handle_pdf(message):
     for page in pdf:
         text += page.get_text()
 
-    lines = text.splitlines()
-
     delivery_time = None
     start_time = None
     earnings = 0.0
 
-    for idx, line in enumerate(lines):
-        if "Average order delivery time" in line:
-            if idx + 1 < len(lines):
-                candidate = lines[idx + 1].strip()
-                if re.match(r'^\d{1,2}:\d{2}$', candidate):
-                    delivery_time = candidate
-        if "Average Jush task start time" in line:
-            if idx + 1 < len(lines):
-                candidate = lines[idx + 1].strip()
-                if re.match(r'^\d{1,2}:\d{2}$', candidate):
-                    start_time = candidate
-        if "Total earnings" in line:
-            if idx + 1 < len(lines):
-                candidate_line = lines[idx + 1].strip()
-                match = re.search(r'(\d+[.,]?\d*)\s*zł', candidate_line)
-                if match:
-                    earnings = float(match.group(1).replace(',', '.'))
-            break
+    # Find delivery time
+    if "Number of delayed orders" in text:
+        delivery_area = text.split("Number of delayed orders", 1)[-1]
+        match = re.search(r'(\d{1,2}:\d{2})', delivery_area)
+        if match:
+            delivery_time = match.group(1)
+
+    # Find start time
+    if "Shift Lifetime" in text:
+        start_area = text.split("Shift Lifetime", 1)[-1]
+        match = re.search(r'(\d{1,2}:\d{2})', start_area)
+        if match:
+            start_time = match.group(1)
+
+    # Find earnings
+    if "Total earnings" in text:
+        earnings_area = text.split("Total earnings", 1)[-1]
+        numbers = re.findall(r'(\d+[.,]?\d*)(\s*zł)?', earnings_area)
+        seen_plain_number = False
+        for value, is_zloty in numbers:
+            if not is_zloty:
+                seen_plain_number = True
+            elif seen_plain_number and is_zloty:
+                earnings = float(value.replace(',', '.'))
+                break
 
     if not (delivery_time and start_time):
         bot.send_message(message.chat.id, "❌ Couldn't find delivery or start times in the file.")
