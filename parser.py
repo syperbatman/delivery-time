@@ -211,10 +211,30 @@ def parse_words(words: list[Word], filename: Optional[str] = None) -> ParsedRepo
     )
 
 
-def parse_pdf(data: bytes, filename: Optional[str] = None) -> ParsedReport:
-    """Разбор PDF-байтов: извлекаем слова с координатами через PyMuPDF и парсим."""
+# Маркеры типа отчёта. Дневной: "Work Date is on <дата>". Недельный ("tygodniowe"):
+# заголовок + диапазон дат "Work Date is from ... until ..." / "Summary Range".
+_WEEKLY_MARKERS = ("tygodniowe", "summary range", "zakres podsumowania", "work date is from")
+_DAILY_MARKER = "work date is on"
+
+
+def detect_report_kind(words: list[Word]) -> str:
+    """Тип отчёта: 'daily' | 'weekly' | 'unknown'. Принимаем только 'daily'."""
+    tl = _flat_text(words).lower()
+    if any(m in tl for m in _WEEKLY_MARKERS):
+        return "weekly"
+    if _DAILY_MARKER in tl:
+        return "daily"
+    return "unknown"
+
+
+def extract_words_from_pdf(data: bytes) -> list[Word]:
+    """Слова с координатами из первой страницы PDF (PyMuPDF)."""
     import fitz
 
     page = fitz.open(stream=data, filetype="pdf")[0]
-    words = words_from_tuples(page.get_text("words"))
-    return parse_words(words, filename)
+    return words_from_tuples(page.get_text("words"))
+
+
+def parse_pdf(data: bytes, filename: Optional[str] = None) -> ParsedReport:
+    """Разбор PDF-байтов в ParsedReport (без проверки типа отчёта)."""
+    return parse_words(extract_words_from_pdf(data), filename)

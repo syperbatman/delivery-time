@@ -22,7 +22,7 @@ except ImportError:
     pass
 
 import db
-from parser import parse_pdf, seconds_to_time
+from parser import extract_words_from_pdf, detect_report_kind, parse_words, seconds_to_time
 
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
@@ -33,35 +33,10 @@ db.init_db()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Статус аккаунта зависит от ОБЕИХ недельных метрик: времени доставки и выезда.
-# TODO: ПОРОГИ — ЗАГЛУШКА. Заполнить реальными значениями платформы.
-#   Формат каждого списка: [(граница_в_секундах, "статус"), ...] по возрастанию;
-#   элемент (None, "...") — для всего, что выше последней границы.
-#   Пример: DELIVERY_THRESHOLDS = [(8*60, "🟢"), (10*60, "🟡"), (None, "🔴")]
-DELIVERY_THRESHOLDS = []   # пусто = пороги ещё не заданы
-START_THRESHOLDS = []
-
-
-def _grade(value, thresholds):
-    if value is None:
-        return "нет данных"
-    if not thresholds:
-        return "порог не задан"
-    for limit, label in thresholds:
-        if limit is None or value <= limit:
-            return label
-    return thresholds[-1][1]
-
-
-def account_status(avg_delivery_sec, avg_start_sec):
-    if not DELIVERY_THRESHOLDS and not START_THRESHOLDS:
-        return "❓ пороги статусов ещё не заданы"
-    return (
-        f"доставка — {_grade(avg_delivery_sec, DELIVERY_THRESHOLDS)}; "
-        f"выезд — {_grade(avg_start_sec, START_THRESHOLDS)}"
-    )
-
-
+# СТАТУС/УРОВЕНЬ АККАУНТА — отложено. Это tier/очки (напр. "Silver 🥈 70"),
+# зависит не только от среднего времени и различается по магазинам. Сюда же —
+# будущие рекомендации курьеру (сколько ∅-доставок до нужного среднего, запас
+# по времени, манипуляция доставка⇄выезд). Требует отдельной проработки.
 # ─────────────────────────────────────────────────────────────────────────────
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
@@ -99,11 +74,27 @@ def handle_pdf(message):
     try:
         file_info = bot.get_file(doc.file_id)
         data = bot.download_file(file_info.file_path)
-        report = parse_pdf(data, filename=fname)
+        words = extract_words_from_pdf(data)
     except Exception as e:  # noqa: BLE001
         bot.send_message(message.chat.id, f"❌ Не удалось прочитать PDF: {e}")
         return
 
+    kind = detect_report_kind(words)
+    if kind == "weekly":
+        bot.send_message(
+            message.chat.id,
+            "📅 Это НЕДЕЛЬНЫЙ отчёт (Twoje tygodniowe podsumowanie). "
+            "Я веду подсчёт по ДНЕВНЫМ отчётам — пришли, пожалуйста, отчёт за один день.",
+        )
+        return
+    if kind != "daily":
+        bot.send_message(
+            message.chat.id,
+            "❌ Не похоже на дневной отчёт «Twoje podsumowanie». Проверь файл.",
+        )
+        return
+
+    report = parse_words(words, filename=fname)
     if not report.report_date:
         bot.send_message(
             message.chat.id,
@@ -119,18 +110,22 @@ def handle_pdf(message):
 
     # подтверждение по дню
     when = "обновил" if action == "updated" else "принял"
+    before_23 = report.orders_before_23
+    after_23 = max(report.orders_all - report.orders_before_23, 0)
+    orders_line = f"📦 Заказов: до 23:00 — {before_23} · после 23:00 — {after_23}"
+
     if report.delivery_sec is None:
         day_line = (
             f"✅ {when} отчёт за {report.report_date}.\n"
             f"⌀ Время доставки за этот день не считается (смена после 23:00).\n"
-            f"🛵 Время выезда: {seconds_to_time(report.start_sec)} · "
-            f"заказов: {report.delivered_orders} · {report.earnings:.2f} zł"
+            f"🛵 Время выезда: {seconds_to_time(report.start_sec)} · {report.earnings:.2f} zł\n"
+            f"{orders_line}"
         )
     else:
         day_line = (
             f"✅ {when} отчёт за {report.report_date}.\n"
-            f"⏱ Время доставки: {seconds_to_time(report.delivery_sec)} · "
-            f"заказов: {report.delivered_orders} · {report.earnings:.2f} zł"
+            f"⏱ Время доставки: {seconds_to_time(report.delivery_sec)} · {report.earnings:.2f} zł\n"
+            f"{orders_line}"
         )
 
     # после загрузки показываем неделю ИМЕННО присланного отчёта (а не сегодняшнюю)
@@ -146,11 +141,10 @@ def _week_block(w) -> str:
     return "\n".join([
         f"🗓 {date.fromisoformat(w.week_start).strftime('%d.%m')} — "
         f"{date.fromisoformat(w.week_end).strftime('%d.%m.%Y')}",
-        f"⏱ Доставка: {seconds_to_time(w.avg_delivery_sec)}"
-        f"  (дней с данными: {w.days_with_delivery}/{w.days_total})",
+        f"⏱ Доставка: {seconds_to_time(w.avg_delivery_sec)}",
         f"🛵 Выезд: {seconds_to_time(w.avg_start_sec)}",
         f"📦 Заказов: {w.total_orders}  ·  💰 {w.total_earnings:.2f} zł",
-        f"🏷 {account_status(w.avg_delivery_sec, w.avg_start_sec)}",
+        f"📄 Отчётов за неделю: {w.days_total}",
     ])
 
 

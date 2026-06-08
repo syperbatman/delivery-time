@@ -11,14 +11,29 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from parser import parse_words, words_from_tuples, seconds_to_time  # noqa: E402
+from parser import parse_words, words_from_tuples, seconds_to_time, detect_report_kind  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_2026-06-05.words.json")
+FIXTURE_WEEKLY = os.path.join(os.path.dirname(__file__), "fixtures", "sample_weekly_2026-05-25.words.json")
 
 
 def load_words():
     data = json.load(open(FIXTURE, encoding="utf-8"))
     return words_from_tuples(data["words"])
+
+
+def load_weekly_words():
+    data = json.load(open(FIXTURE_WEEKLY, encoding="utf-8"))
+    return words_from_tuples(data["words"])
+
+
+def test_daily_report_detected_as_daily():
+    assert detect_report_kind(load_words()) == "daily"
+
+
+def test_weekly_report_detected_and_rejected():
+    """Недельный отчёт (Twoje tygodniowe podsumowanie) НЕ должен приниматься как дневной."""
+    assert detect_report_kind(load_weekly_words()) == "weekly"
 
 
 def test_empty_delivery_is_none_not_a_neighbor_value():
