@@ -45,6 +45,18 @@ bot = telebot.TeleBot(TOKEN)
 db.init_db()
 
 
+def _has_access(user_id: int) -> bool:
+    """Доступ есть у владельца и у активных подписчиков."""
+    return user_id == ADMIN_ID or db.is_subscribed(user_id)
+
+
+def _no_access_msg(user_id: int) -> str:
+    return (
+        "🔒 Доступ к боту — по подписке.\n"
+        f"Чтобы получить доступ, передай этот ID администратору: {user_id}"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # СТАТУС/УРОВЕНЬ АККАУНТА — отложено. Это tier/очки (напр. "Silver 🥈 70"),
 # зависит не только от среднего времени и различается по магазинам. Сюда же —
@@ -53,12 +65,21 @@ db.init_db()
 # ─────────────────────────────────────────────────────────────────────────────
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
+    uid = message.from_user.id
+    if uid == ADMIN_ID:
+        access = "✅ Доступ администратора."
+    elif db.is_subscribed(uid):
+        access = f"✅ Доступ активен до {db.subscription_until(uid)}."
+    else:
+        access = ("🔒 Доступ к боту — по подписке.\n"
+                  f"Передай этот ID администратору для активации: {uid}")
     bot.reply_to(
         message,
-        "👋 Привет! Пересылай сюда свой ежедневный PDF-отчёт — я распознаю дату и "
-        "время доставки, сохраню по дням и посчитаю среднее за неделю (Пн–Вс).\n\n"
+        "👋 Привет! Пересылай сюда ежедневный PDF-отчёт — я распознаю дату и "
+        "время доставки/выезда, сохраню по дням и посчитаю среднее за неделю (Пн–Вс).\n\n"
+        f"{access}\n\n"
         "Команды:\n"
-        "/stats — среднее за текущую неделю и статус\n"
+        "/stats — сводка по неделям\n"
         "/reset — удалить все мои данные",
     )
 
@@ -71,6 +92,9 @@ def cmd_reset(message):
 
 @bot.message_handler(commands=["stats"])
 def cmd_stats(message):
+    if not _has_access(message.from_user.id):
+        bot.send_message(message.chat.id, _no_access_msg(message.from_user.id))
+        return
     bot.send_message(message.chat.id, _format_all_weeks(message.from_user.id))
 
 
@@ -87,7 +111,42 @@ def cmd_admin(message):
         f"📄 Отчётов всего: {s['total_reports']}\n"
         f"🗓 За неделю ({s['week_start']}–{s['week_end']}): "
         f"{s['week_users']} польз. · {s['week_reports']} отч.\n"
+        f"💳 Активных подписок: {s['active_subs']}\n"
         f"🕒 Последняя активность: {s['last_activity'] or '—'}",
+    )
+
+
+@bot.message_handler(commands=["grant"])
+def cmd_grant(message):
+    if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+        return
+    parts = (message.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(message.chat.id, "Использование: /grant <user_id> [дней=30]")
+        return
+    target = int(parts[1])
+    days = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30
+    until = db.grant_subscription(target, days)
+    bot.send_message(message.chat.id, f"✅ Подписка для {target} активна до {until} (+{days} дн.)")
+    try:
+        bot.send_message(target, f"🎉 Доступ активирован до {until}. Можешь присылать отчёты!")
+    except Exception:  # noqa: BLE001
+        pass  # пользователь мог ещё не открыть чат с ботом
+
+
+@bot.message_handler(commands=["revoke"])
+def cmd_revoke(message):
+    if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+        return
+    parts = (message.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(message.chat.id, "Использование: /revoke <user_id>")
+        return
+    target = int(parts[1])
+    ok = db.revoke_subscription(target)
+    bot.send_message(
+        message.chat.id,
+        f"{'✅ Подписка закрыта' if ok else '⚠️ Подписки и не было'} для {target}",
     )
 
 
@@ -96,6 +155,11 @@ def handle_pdf(message):
     user_id = message.from_user.id
     doc = message.document
     fname = doc.file_name or ""
+
+    # 0) доступ по подписке (владелец — всегда)
+    if not _has_access(user_id):
+        bot.send_message(message.chat.id, _no_access_msg(user_id))
+        return
 
     # 1) фильтр по имени ДО скачивания: принимаем только отчёты вида
     #    'YYYY-MM-DD-...podsumowanie.pdf'. Чужие файлы даже не качаем и не парсим.

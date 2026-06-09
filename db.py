@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS reports (
     parsed_at        TEXT,
     PRIMARY KEY (user_id, report_date)
 );
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id    INTEGER PRIMARY KEY,
+    until       TEXT NOT NULL,    -- 'YYYY-MM-DD', включительно последний активный день
+    updated_at  TEXT,
+    note        TEXT
+);
 """
 
 
@@ -195,6 +202,7 @@ def delete_user_data(user_id: int) -> int:
 def admin_stats() -> dict:
     """Сводка для владельца: пользователи/отчёты всего и за текущую неделю."""
     wk_start, wk_end = week_bounds(date.today())
+    today = date.today().isoformat()
     with get_conn() as conn:
         total_users = conn.execute(
             "SELECT COUNT(DISTINCT user_id) FROM reports").fetchone()[0]
@@ -208,6 +216,8 @@ def admin_stats() -> dict:
             (wk_start, wk_end)).fetchone()[0]
         last_activity = conn.execute(
             "SELECT MAX(parsed_at) FROM reports").fetchone()[0]
+        active_subs = conn.execute(
+            "SELECT COUNT(*) FROM subscriptions WHERE until >= ?", (today,)).fetchone()[0]
     return {
         "total_users": total_users,
         "total_reports": total_reports,
@@ -216,4 +226,51 @@ def admin_stats() -> dict:
         "week_start": wk_start,
         "week_end": wk_end,
         "last_activity": last_activity,
+        "active_subs": active_subs,
     }
+
+
+# ───────────────────────────── подписки ─────────────────────────────
+def subscription_until(user_id: int) -> Optional[str]:
+    """Дата окончания подписки 'YYYY-MM-DD' или None, если подписки нет."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT until FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+    return row["until"] if row else None
+
+
+def is_subscribed(user_id: int) -> bool:
+    """Активна ли подписка сегодня (ISO-даты сравниваются как строки корректно)."""
+    until = subscription_until(user_id)
+    return bool(until and until >= date.today().isoformat())
+
+
+def grant_subscription(user_id: int, days: int = 30, note: str = "") -> str:
+    """Выдать/продлить подписку на days дней. Если ещё активна — продлеваем от её конца."""
+    today = date.today()
+    cur = subscription_until(user_id)
+    base = today
+    if cur:
+        cur_d = date.fromisoformat(cur)
+        if cur_d > today:
+            base = cur_d
+    new_until = (base + timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO subscriptions (user_id, until, updated_at, note) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET until=excluded.until, "
+            "updated_at=excluded.updated_at, note=excluded.note",
+            (user_id, new_until, datetime.now().isoformat(timespec="seconds"), note),
+        )
+    return new_until
+
+
+def revoke_subscription(user_id: int) -> bool:
+    """Закрыть подписку немедленно (until = вчера). Возвращает True, если запись была."""
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE subscriptions SET until=?, updated_at=? WHERE user_id=?",
+            (yesterday, datetime.now().isoformat(timespec="seconds"), user_id),
+        )
+        return cur.rowcount > 0
