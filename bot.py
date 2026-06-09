@@ -74,11 +74,6 @@ def cmd_stats(message):
     bot.send_message(message.chat.id, _format_all_weeks(message.from_user.id))
 
 
-@bot.message_handler(commands=["myid"])
-def cmd_myid(message):
-    bot.reply_to(message, f"Твой Telegram ID: {message.from_user.id}")
-
-
 @bot.message_handler(commands=["admin"])
 def cmd_admin(message):
     # отвечаем только владельцу; остальным — молча игнорируем (команда не выдаёт себя)
