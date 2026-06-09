@@ -32,6 +32,11 @@ from parser import (
 
 MAX_PDF_BYTES = 3 * 1024 * 1024   # реальные отчёты ~700 КБ; всё крупнее — отклоняем
 
+try:
+    ADMIN_ID = int(os.environ.get("ADMIN_ID", "0") or "0")  # Telegram ID владельца; /admin только ему
+except ValueError:
+    ADMIN_ID = 0
+
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("❌ TOKEN not found! Положи токен бота в переменную окружения TOKEN.")
@@ -67,6 +72,28 @@ def cmd_reset(message):
 @bot.message_handler(commands=["stats"])
 def cmd_stats(message):
     bot.send_message(message.chat.id, _format_all_weeks(message.from_user.id))
+
+
+@bot.message_handler(commands=["myid"])
+def cmd_myid(message):
+    bot.reply_to(message, f"Твой Telegram ID: {message.from_user.id}")
+
+
+@bot.message_handler(commands=["admin"])
+def cmd_admin(message):
+    # отвечаем только владельцу; остальным — молча игнорируем (команда не выдаёт себя)
+    if not ADMIN_ID or message.from_user.id != ADMIN_ID:
+        return
+    s = db.admin_stats()
+    bot.send_message(
+        message.chat.id,
+        "🛠 Админ-сводка\n"
+        f"👥 Пользователей: {s['total_users']}\n"
+        f"📄 Отчётов всего: {s['total_reports']}\n"
+        f"🗓 За неделю ({s['week_start']}–{s['week_end']}): "
+        f"{s['week_users']} польз. · {s['week_reports']} отч.\n"
+        f"🕒 Последняя активность: {s['last_activity'] or '—'}",
+    )
 
 
 @bot.message_handler(content_types=["document"])

@@ -190,3 +190,30 @@ def delete_user_data(user_id: int) -> int:
     with get_conn() as conn:
         cur = conn.execute("DELETE FROM reports WHERE user_id=?", (user_id,))
         return cur.rowcount
+
+
+def admin_stats() -> dict:
+    """Сводка для владельца: пользователи/отчёты всего и за текущую неделю."""
+    wk_start, wk_end = week_bounds(date.today())
+    with get_conn() as conn:
+        total_users = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM reports").fetchone()[0]
+        total_reports = conn.execute(
+            "SELECT COUNT(*) FROM reports").fetchone()[0]
+        week_users = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM reports WHERE report_date BETWEEN ? AND ?",
+            (wk_start, wk_end)).fetchone()[0]
+        week_reports = conn.execute(
+            "SELECT COUNT(*) FROM reports WHERE report_date BETWEEN ? AND ?",
+            (wk_start, wk_end)).fetchone()[0]
+        last_activity = conn.execute(
+            "SELECT MAX(parsed_at) FROM reports").fetchone()[0]
+    return {
+        "total_users": total_users,
+        "total_reports": total_reports,
+        "week_users": week_users,
+        "week_reports": week_reports,
+        "week_start": wk_start,
+        "week_end": wk_end,
+        "last_activity": last_activity,
+    }
