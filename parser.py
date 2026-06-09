@@ -217,6 +217,17 @@ _WEEKLY_MARKERS = ("tygodniowe", "summary range", "zakres podsumowania", "work d
 _DAILY_MARKER = "work date is on"
 
 
+# Имя файла отчёта: дата в начале + 'podsumowanie' + '.pdf'. Примеры:
+#   '2026-06-05-Twoje-podsumowanie.pdf'
+#   '2026-05-25-to-2026-05-31-Twoje-tygodniowe-podsumowanie.pdf'
+_REPORT_FILENAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}.*podsumowanie.*\.pdf$", re.IGNORECASE)
+
+
+def looks_like_report_filename(filename) -> bool:
+    """Дешёвый фильтр ДО скачивания: похоже ли имя файла на отчёт."""
+    return bool(filename and _REPORT_FILENAME_RE.match(filename.strip()))
+
+
 def detect_report_kind(words: list[Word]) -> str:
     """Тип отчёта: 'daily' | 'weekly' | 'unknown'. Принимаем только 'daily'."""
     tl = _flat_text(words).lower()

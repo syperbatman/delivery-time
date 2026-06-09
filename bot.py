@@ -22,7 +22,15 @@ except ImportError:
     pass
 
 import db
-from parser import extract_words_from_pdf, detect_report_kind, parse_words, seconds_to_time
+from parser import (
+    extract_words_from_pdf,
+    detect_report_kind,
+    looks_like_report_filename,
+    parse_words,
+    seconds_to_time,
+)
+
+MAX_PDF_BYTES = 3 * 1024 * 1024   # реальные отчёты ~700 КБ; всё крупнее — отклоняем
 
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
@@ -67,8 +75,22 @@ def handle_pdf(message):
     doc = message.document
     fname = doc.file_name or ""
 
-    if not fname.lower().endswith(".pdf"):
-        bot.send_message(message.chat.id, "❌ Пришли, пожалуйста, PDF-файл отчёта.")
+    # 1) фильтр по имени ДО скачивания: принимаем только отчёты вида
+    #    'YYYY-MM-DD-...podsumowanie.pdf'. Чужие файлы даже не качаем и не парсим.
+    if not looks_like_report_filename(fname):
+        bot.send_message(
+            message.chat.id,
+            "🤖 Я принимаю только файлы-отчёты (PDF «…podsumowanie.pdf»). "
+            "Перешли отчёт как есть, не переименовывая.",
+        )
+        return
+
+    # 2) лимит размера — тоже до скачивания (защита от огромных/битых файлов)
+    if doc.file_size and doc.file_size > MAX_PDF_BYTES:
+        bot.send_message(
+            message.chat.id,
+            f"❌ Файл слишком большой (> {MAX_PDF_BYTES // (1024 * 1024)} МБ). Это точно отчёт?",
+        )
         return
 
     try:
@@ -76,7 +98,8 @@ def handle_pdf(message):
         data = bot.download_file(file_info.file_path)
         words = extract_words_from_pdf(data)
     except Exception as e:  # noqa: BLE001
-        bot.send_message(message.chat.id, f"❌ Не удалось прочитать PDF: {e}")
+        print(f"[error] чтение PDF не удалось (user {user_id}): {e}")  # в лог сервера, не юзеру
+        bot.send_message(message.chat.id, "❌ Не удалось прочитать PDF. Это корректный отчёт?")
         return
 
     kind = detect_report_kind(words)
@@ -105,7 +128,8 @@ def handle_pdf(message):
     try:
         action = db.upsert_report(user_id, report)
     except Exception as e:  # noqa: BLE001
-        bot.send_message(message.chat.id, f"❌ Ошибка сохранения: {e}")
+        print(f"[error] сохранение не удалось (user {user_id}): {e}")  # в лог сервера
+        bot.send_message(message.chat.id, "❌ Не удалось сохранить отчёт, попробуй ещё раз.")
         return
 
     # подтверждение по дню

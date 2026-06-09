@@ -11,7 +11,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from parser import parse_words, words_from_tuples, seconds_to_time, detect_report_kind  # noqa: E402
+from parser import (  # noqa: E402
+    parse_words,
+    words_from_tuples,
+    seconds_to_time,
+    detect_report_kind,
+    looks_like_report_filename,
+)
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_2026-06-05.words.json")
 FIXTURE_WEEKLY = os.path.join(os.path.dirname(__file__), "fixtures", "sample_weekly_2026-05-25.words.json")
@@ -34,6 +40,18 @@ def test_daily_report_detected_as_daily():
 def test_weekly_report_detected_and_rejected():
     """Недельный отчёт (Twoje tygodniowe podsumowanie) НЕ должен приниматься как дневной."""
     assert detect_report_kind(load_weekly_words()) == "weekly"
+
+
+def test_report_filename_filter():
+    """До скачивания принимаем только файлы-отчёты по имени; прочее отсекаем."""
+    assert looks_like_report_filename("2026-06-05-Twoje-podsumowanie.pdf")
+    assert looks_like_report_filename("2026-05-25-to-2026-05-31-Twoje-tygodniowe-podsumowanie.pdf")
+    assert not looks_like_report_filename("document.pdf")
+    assert not looks_like_report_filename("photo.jpg")
+    assert not looks_like_report_filename("2026-06-05-invoice.pdf")  # дата есть, 'podsumowanie' нет
+    assert not looks_like_report_filename("podsumowanie.pdf")        # нет даты в начале
+    assert not looks_like_report_filename(None)
+    assert not looks_like_report_filename("")
 
 
 def test_empty_delivery_is_none_not_a_neighbor_value():
