@@ -246,14 +246,24 @@ def handle_pdf(message):
 MAX_WEEKS_IN_STATS = 12  # лимит, чтобы не упереться в макс. длину сообщения Telegram (~4096)
 
 
+# Бонус к каждому заказу при разных статусах (zł). Итог = заработок + заказы × бонус.
+TIER_BONUS = {"gold": 1.5, "silver": 0.75, "bronze": 0.5}
+
+
 def _week_block(w) -> str:
     """Одна календарная неделя в виде текстового блока."""
+    o = w.total_orders
+    gold = w.total_earnings + o * TIER_BONUS["gold"]
+    silver = w.total_earnings + o * TIER_BONUS["silver"]
+    bronze = w.total_earnings + o * TIER_BONUS["bronze"]
     return "\n".join([
         f"🗓 {date.fromisoformat(w.week_start).strftime('%d.%m')} — "
         f"{date.fromisoformat(w.week_end).strftime('%d.%m.%Y')}",
         f"⏱ Доставка: {seconds_to_time(w.avg_delivery_sec)}",
         f"🛵 Выезд: {seconds_to_time(w.avg_start_sec)}",
-        f"📦 Заказов: {w.total_orders}  ·  💰 {w.total_earnings:.2f} zł",
+        f"📦 Заказов: {o}",
+        f"💰 Заработок: {w.total_earnings:.2f} zł "
+        f"(🥇 {gold:.2f} · 🥈 {silver:.2f} · 🥉 {bronze:.2f})",
         f"📄 Отчётов за неделю: {w.days_total}",
     ])
 
