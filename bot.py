@@ -58,22 +58,6 @@ def _no_access_msg(user_id: int) -> str:
     )
 
 
-HELP_TEXT = (
-    "ℹ️ Как пользоваться:\n"
-    "1. Каждый день пересылай сюда свой PDF-отчёт (Twoje podsumowanie).\n"
-    "2. Я распознаю время доставки/выезда, заказы и заработок и сохраню по дням.\n"
-    "3. Жми «📊 Статистика» (или /stats) — покажу среднее за неделю (Пн–Вс).\n\n"
-    "Доступ к боту — по подписке. Команда /reset удаляет твои данные."
-)
-
-
-def main_keyboard() -> types.ReplyKeyboardMarkup:
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row(types.KeyboardButton("📊 Статистика"))
-    kb.row(types.KeyboardButton("ℹ️ Помощь"))
-    return kb
-
-
 def _setup_commands() -> None:
     """Меню команд (синяя кнопка Menu). Админские — только в чате владельца."""
     public = [
@@ -120,7 +104,7 @@ def cmd_start(message):
         "Команды:\n"
         "/stats — сводка по неделям\n"
         "/reset — удалить все мои данные",
-        reply_markup=main_keyboard(),
+        reply_markup=types.ReplyKeyboardRemove(),
     )
 
 
@@ -136,16 +120,6 @@ def cmd_stats(message):
         bot.send_message(message.chat.id, _no_access_msg(message.from_user.id))
         return
     bot.send_message(message.chat.id, _format_all_weeks(message.from_user.id))
-
-
-@bot.message_handler(func=lambda m: m.text == "📊 Статистика")
-def btn_stats(message):
-    cmd_stats(message)
-
-
-@bot.message_handler(func=lambda m: m.text == "ℹ️ Помощь")
-def btn_help(message):
-    bot.send_message(message.chat.id, HELP_TEXT)
 
 
 @bot.message_handler(commands=["admin"])
