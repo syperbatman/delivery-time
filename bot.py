@@ -42,7 +42,10 @@ TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("❌ TOKEN not found! Положи токен бота в переменную окружения TOKEN.")
 
-bot = telebot.TeleBot(TOKEN)
+# threaded=False: обрабатываем сообщения по очереди. На сервере 384 МБ RAM —
+# несколько одновременных парсингов PDF (PyMuPDF) могут добить память (OOM).
+# Для ~50 пользователей очередь в секунды незаметна.
+bot = telebot.TeleBot(TOKEN, threaded=False)
 db.init_db()
 
 
@@ -110,8 +113,27 @@ def cmd_start(message):
 
 @bot.message_handler(commands=["reset"])
 def cmd_reset(message):
-    n = db.delete_user_data(message.from_user.id)
-    bot.send_message(message.chat.id, f"🗑 Удалено записей: {n}. Можно присылать отчёты заново.")
+    kb = types.InlineKeyboardMarkup()
+    kb.row(
+        types.InlineKeyboardButton("✅ Да, удалить всё", callback_data="reset:yes"),
+        types.InlineKeyboardButton("❌ Отмена", callback_data="reset:no"),
+    )
+    bot.send_message(
+        message.chat.id,
+        "⚠️ Удалить ВСЕ твои отчёты и статистику? Это необратимо.",
+        reply_markup=kb,
+    )
+
+
+@bot.callback_query_handler(func=lambda c: c.data in ("reset:yes", "reset:no"))
+def cb_reset(call):
+    if call.data == "reset:yes":
+        n = db.delete_user_data(call.from_user.id)
+        text = f"🗑 Удалено записей: {n}. Можно присылать отчёты заново."
+    else:
+        text = "👌 Отменено, данные на месте."
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
 
 
 @bot.message_handler(commands=["stats"])
@@ -303,6 +325,27 @@ def _format_all_weeks(user_id: int) -> str:
         text += (f"\n\n… и ещё {len(weeks) - len(shown)} нед. ранее "
                  f"(показаны последние {MAX_WEEKS_IN_STATS}).")
     return text
+
+
+# Fallback на всё, что бот не понимает (текст, фото, стикеры...). Регистрируется
+# ПОСЛЕДНИМ: команды и документы перехватываются обработчиками выше.
+@bot.message_handler(content_types=[
+    "text", "photo", "sticker", "voice", "video", "audio",
+    "animation", "video_note", "location", "contact",
+])
+def fallback(message):
+    if message.content_type == "photo":
+        bot.send_message(
+            message.chat.id,
+            "🖼 Похоже, это фото/скриншот — его я распознать не могу.\n"
+            "Перешли отчёт файлом (PDF из письма).",
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "🤖 Я понимаю только PDF-отчёты и команды.\n"
+            "Перешли дневной отчёт (Twoje podsumowanie) файлом или нажми /start.",
+        )
 
 
 if __name__ == "__main__":
