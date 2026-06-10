@@ -14,6 +14,7 @@ import os
 from datetime import date
 
 import telebot
+from telebot import types
 
 try:
     from dotenv import load_dotenv  # локально читаем .env; на проде переменные задаёт хостинг
@@ -57,6 +58,44 @@ def _no_access_msg(user_id: int) -> str:
     )
 
 
+HELP_TEXT = (
+    "ℹ️ Как пользоваться:\n"
+    "1. Каждый день пересылай сюда свой PDF-отчёт (Twoje podsumowanie).\n"
+    "2. Я распознаю время доставки/выезда, заказы и заработок и сохраню по дням.\n"
+    "3. Жми «📊 Статистика» (или /stats) — покажу среднее за неделю (Пн–Вс).\n\n"
+    "Доступ к боту — по подписке. Команда /reset удаляет твои данные."
+)
+
+
+def main_keyboard() -> types.ReplyKeyboardMarkup:
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row(types.KeyboardButton("📊 Статистика"))
+    kb.row(types.KeyboardButton("ℹ️ Помощь"))
+    return kb
+
+
+def _setup_commands() -> None:
+    """Меню команд (синяя кнопка Menu). Админские — только в чате владельца."""
+    public = [
+        types.BotCommand("start", "Запуск и статус доступа"),
+        types.BotCommand("stats", "Сводка по неделям"),
+        types.BotCommand("reset", "Удалить мои данные"),
+    ]
+    try:
+        bot.set_my_commands(public)
+        if ADMIN_ID:
+            bot.set_my_commands(
+                public + [
+                    types.BotCommand("admin", "Админ-сводка"),
+                    types.BotCommand("grant", "Выдать подписку: /grant id [дней]"),
+                    types.BotCommand("revoke", "Закрыть подписку: /revoke id"),
+                ],
+                scope=types.BotCommandScopeChat(ADMIN_ID),
+            )
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] set_my_commands: {e}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # СТАТУС/УРОВЕНЬ АККАУНТА — отложено. Это tier/очки (напр. "Silver 🥈 70"),
 # зависит не только от среднего времени и различается по магазинам. Сюда же —
@@ -73,14 +112,15 @@ def cmd_start(message):
     else:
         access = ("🔒 Доступ к боту — по подписке.\n"
                   f"Передай этот ID администратору для активации: {uid}")
-    bot.reply_to(
-        message,
+    bot.send_message(
+        message.chat.id,
         "👋 Привет! Пересылай сюда ежедневный PDF-отчёт — я распознаю дату и "
         "время доставки/выезда, сохраню по дням и посчитаю среднее за неделю (Пн–Вс).\n\n"
         f"{access}\n\n"
         "Команды:\n"
         "/stats — сводка по неделям\n"
         "/reset — удалить все мои данные",
+        reply_markup=main_keyboard(),
     )
 
 
@@ -96,6 +136,16 @@ def cmd_stats(message):
         bot.send_message(message.chat.id, _no_access_msg(message.from_user.id))
         return
     bot.send_message(message.chat.id, _format_all_weeks(message.from_user.id))
+
+
+@bot.message_handler(func=lambda m: m.text == "📊 Статистика")
+def btn_stats(message):
+    cmd_stats(message)
+
+
+@bot.message_handler(func=lambda m: m.text == "ℹ️ Помощь")
+def btn_help(message):
+    bot.send_message(message.chat.id, HELP_TEXT)
 
 
 @bot.message_handler(commands=["admin"])
@@ -282,5 +332,6 @@ def _format_all_weeks(user_id: int) -> str:
 
 
 if __name__ == "__main__":
+    _setup_commands()
     print("Bot started.")
     bot.infinity_polling()
