@@ -38,8 +38,8 @@ try:
 except ValueError:
     ADMIN_ID = 0
 
-# Платный канал: участник канала = есть доступ к боту. Бот должен быть АДМИНОМ канала.
-# Формат: @username или числовой -100... ; пусто = проверка по каналу выключена.
+# Платный канал: ПЛАТНЫЙ подписчик канала = есть доступ к боту (бесплатные участники — нет).
+# Бот должен быть АДМИНОМ канала. Формат: @username или -100... ; пусто = проверка выключена.
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
 
 TOKEN = os.environ.get("TOKEN")
@@ -53,13 +53,18 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 db.init_db()
 
 
-def _is_channel_member(user_id: int) -> bool:
-    """Активный участник платного канала. Бот должен быть админом канала."""
+def _is_paid_channel_member(user_id: int) -> bool:
+    """
+    Активный ПЛАТНЫЙ подписчик канала (нативная подписка Telegram).
+    У платного подписчика есть дата окончания подписки (until_date); у обычных
+    бесплатных участников её нет — поэтому отличаем платных от бесплатных.
+    Бот должен быть админом канала.
+    """
     if not CHANNEL_ID:
         return False
     try:
-        status = bot.get_chat_member(CHANNEL_ID, user_id).status
-        return status in ("creator", "administrator", "member")
+        m = bot.get_chat_member(CHANNEL_ID, user_id)
+        return m.status == "member" and getattr(m, "until_date", None) is not None
     except Exception:  # noqa: BLE001 — не участник / нет прав / нет канала
         return False
 
@@ -69,7 +74,7 @@ def _has_access(user_id: int) -> bool:
     return (
         user_id == ADMIN_ID
         or db.is_subscribed(user_id)
-        or _is_channel_member(user_id)
+        or _is_paid_channel_member(user_id)
     )
 
 
@@ -115,8 +120,8 @@ def cmd_start(message):
         access = "✅ Доступ администратора."
     elif db.is_subscribed(uid):
         access = f"✅ Доступ активен до {db.subscription_until(uid)}."
-    elif _is_channel_member(uid):
-        access = "✅ Доступ активен (по подписке на канал)."
+    elif _is_paid_channel_member(uid):
+        access = "✅ Доступ активен (платная подписка на канал)."
     else:
         access = ("🔒 Доступ к боту — по подписке.\n"
                   f"Передай этот ID администратору для активации: {uid}")
