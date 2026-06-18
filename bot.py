@@ -38,6 +38,10 @@ try:
 except ValueError:
     ADMIN_ID = 0
 
+# Платный канал: участник канала = есть доступ к боту. Бот должен быть АДМИНОМ канала.
+# Формат: @username или числовой -100... ; пусто = проверка по каналу выключена.
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
+
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("❌ TOKEN not found! Положи токен бота в переменную окружения TOKEN.")
@@ -49,9 +53,24 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 db.init_db()
 
 
+def _is_channel_member(user_id: int) -> bool:
+    """Активный участник платного канала. Бот должен быть админом канала."""
+    if not CHANNEL_ID:
+        return False
+    try:
+        status = bot.get_chat_member(CHANNEL_ID, user_id).status
+        return status in ("creator", "administrator", "member")
+    except Exception:  # noqa: BLE001 — не участник / нет прав / нет канала
+        return False
+
+
 def _has_access(user_id: int) -> bool:
-    """Доступ есть у владельца и у активных подписчиков."""
-    return user_id == ADMIN_ID or db.is_subscribed(user_id)
+    """Доступ: владелец, активная подписка (ручная/BMC) или участник платного канала."""
+    return (
+        user_id == ADMIN_ID
+        or db.is_subscribed(user_id)
+        or _is_channel_member(user_id)
+    )
 
 
 def _no_access_msg(user_id: int) -> str:
@@ -96,6 +115,8 @@ def cmd_start(message):
         access = "✅ Доступ администратора."
     elif db.is_subscribed(uid):
         access = f"✅ Доступ активен до {db.subscription_until(uid)}."
+    elif _is_channel_member(uid):
+        access = "✅ Доступ активен (по подписке на канал)."
     else:
         access = ("🔒 Доступ к боту — по подписке.\n"
                   f"Передай этот ID администратору для активации: {uid}")
